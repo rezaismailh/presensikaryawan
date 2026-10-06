@@ -226,7 +226,7 @@ async function loadToday() {
     <tbody>${d.rows.length ? d.rows.map((r) => `
       <tr data-emp="${r.employee_id}">
         <td><div class="who"><span class="n">${esc(r.name)}</span><span class="s">${esc(r.division || 'Tanpa divisi')} · ${typeLabel(r.emp_type)}</span></div></td>
-        <td class="mono">${r.off ? '<span class="badge">Libur</span>' : esc(r.schedule)}</td>
+        <td class="mono">${r.off ? '<span class="badge">Libur</span>' : esc(r.schedule)}${r.custom_schedule ? ' <span class="badge info" title="Jadwal khusus karyawan ini">khusus</span>' : ''}</td>
         <td>${timeCell(r.in)}</td>
         <td>${timeCell(r.out)}${r.early ? ' <span class="badge warn">Pulang cepat</span>' : ''}${r.minutes != null ? `<div class="muted" style="font-size:12px">${fmtDur(r.minutes)}</div>` : ''}</td>
         <td>${statusBadge(r.status, isToday)}</td>
@@ -450,7 +450,7 @@ function renderEmployees() {
         <td><div class="row" style="gap:10px;flex-wrap:nowrap">
           ${e.profile_photo ? `<img class="thumb" src="${esc(e.profile_photo)}" data-photo="${esc(e.profile_photo)}" alt="">` : ''}
           <div class="who"><span class="n">${esc(e.name)}</span><span class="s">${esc(showPhone(e.phone))}</span></div></div></td>
-        <td>${esc(e.division || '—')} ${e.supervisor ? '<span class="badge accent">Atasan</span>' : ''}</td>
+        <td>${esc(e.division || '—')} ${e.supervisor ? '<span class="badge accent">Atasan</span>' : ''} ${scheduleBadge(e)}</td>
         <td>${typeLabel(e.type)}</td>
         <td>${e.status === 'active' ? '<span class="badge ok">Aktif</span>' : '<span class="badge">Nonaktif</span>'}
             ${e.locked ? '<span class="badge danger">Terkunci</span>' : ''}</td>
@@ -486,25 +486,61 @@ $('#e-pending').addEventListener('click', async (e) => {
   }
 });
 
+const daysChecks = (days) => `<div class="days">${[1, 2, 3, 4, 5, 6, 0].map((i) =>
+  `<label><input type="checkbox" name="work_days" value="${i}" ${days.includes(String(i)) ? 'checked' : ''}>${DAYS[i]}</label>`).join('')}</div>`;
+
 function employeeForm(e = {}) {
+  const custom = !!e.work_start;
   return `
     <label class="field">Nama lengkap <input name="name" required maxlength="80" value="${esc(e.name)}"></label>
     <label class="field">No. HP (WhatsApp) <input name="phone" type="tel" required value="${esc(showPhone(e.phone))}" placeholder="0812xxxxxxxx"></label>
     <div class="form-grid">
       <label class="field">Divisi <select name="division_id">${divisionOptions(e.division_id)}</select></label>
       <label class="field">Tipe <select name="type"><option value="karyawan">Karyawan</option><option value="freelance" ${e.type === 'freelance' ? 'selected' : ''}>Freelance</option></select></label>
+    </div>
+    <label class="check"><input type="checkbox" name="custom_schedule" ${custom ? 'checked' : ''}> Jadwal khusus (beda dari jadwal divisi)</label>
+    <div class="stack sched-fields" ${custom ? '' : 'hidden'}>
+      <div class="form-grid">
+        <label class="field">Jam masuk <input type="time" name="work_start" value="${esc(e.work_start || '08:00')}"></label>
+        <label class="field">Jam pulang <input type="time" name="work_end" value="${esc(e.work_end || '17:00')}"></label>
+      </div>
+      ${daysChecks((e.work_days || '1,2,3,4,5').split(','))}
     </div>`;
 }
 
+// Tampilkan isian jadwal khusus saat dicentang; awalnya diisi dari jadwal divisi yang dipilih
+function wireScheduleFields(body) {
+  const cb = body.custom_schedule, box = $('.sched-fields', body);
+  cb.onchange = () => {
+    box.hidden = !cb.checked;
+    const div = state.divisions.find((d) => String(d.id) === body.division_id.value);
+    if (!cb.checked || !div || cb.dataset.touched) return;
+    cb.dataset.touched = '1';
+    body.work_start.value = div.work_start;
+    body.work_end.value = div.work_end;
+    const days = div.work_days.split(',');
+    $$('[name=work_days]', body).forEach((x) => (x.checked = days.includes(x.value)));
+  };
+}
+const employeeBody = (f) => ({
+  ...Object.fromEntries(f),
+  custom_schedule: f.get('custom_schedule') === 'on',
+  work_days: f.getAll('work_days'),
+});
+const scheduleBadge = (e) => (e.work_start
+  ? `<span class="badge info" title="Jadwal khusus, hari: ${e.work_days.split(',').map((x) => DAYS[x]).join(', ')}">Jadwal ${esc(e.work_start)}–${esc(e.work_end)}</span>`
+  : '');
+
 $('#e-add').addEventListener('click', () => {
-  dialog(`<h2>Tambah karyawan</h2>${employeeForm()}
+  const body = dialog(`<h2>Tambah karyawan</h2>${employeeForm()}
     <p class="muted" style="margin:0;font-size:13px">PIN 4 angka dibuat otomatis setelah disimpan.</p>
     <div class="dlg-actions">${cancelBtn}<button type="submit">Simpan</button></div>`,
   async (f) => {
-    const r = await api('/api/admin/employees', { body: Object.fromEntries(f) });
+    const r = await api('/api/admin/employees', { body: employeeBody(f) });
     await loadEmployeesTab();
     setTimeout(() => showPin(r, 'Karyawan ditambahkan'), 0);
   });
+  wireScheduleFields(body);
 });
 
 $('#e-table').addEventListener('click', async (ev) => {
@@ -514,14 +550,15 @@ $('#e-table').addEventListener('click', async (ev) => {
   const emp = state.employees.find((x) => x.id === id);
   try {
     if (btn.dataset.act === 'edit') {
-      dialog(`<h2>Edit karyawan</h2>${employeeForm(emp)}
+      const body = dialog(`<h2>Edit karyawan</h2>${employeeForm(emp)}
         <label class="field">Status <select name="status"><option value="active">Aktif</option><option value="inactive" ${emp.status === 'inactive' ? 'selected' : ''}>Nonaktif (tidak bisa login)</option></select></label>
         <div class="dlg-actions">${cancelBtn}<button type="submit">Simpan</button></div>`,
       async (f) => {
-        await api(`/api/admin/employees/${id}`, { method: 'PUT', body: Object.fromEntries(f) });
+        await api(`/api/admin/employees/${id}`, { method: 'PUT', body: employeeBody(f) });
         toast('Tersimpan.');
         loadEmployeesTab();
       });
+      wireScheduleFields(body);
     } else if (btn.dataset.act === 'reset-pin') {
       if (!confirm(`Buat PIN baru untuk ${emp.name}? PIN lama tidak berlaku lagi dan ia harus login ulang.`)) return;
       showPin(await api(`/api/admin/employees/${id}/reset-pin`, { body: {} }), 'PIN baru');

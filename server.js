@@ -79,6 +79,14 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `);
 
+// Migrasi: jadwal khusus per karyawan (NULL = ikut jadwal divisi)
+{
+  const cols = db.prepare('PRAGMA table_info(employees)').all().map((c) => c.name);
+  for (const c of ['work_start', 'work_end', 'work_days']) {
+    if (!cols.includes(c)) db.exec(`ALTER TABLE employees ADD COLUMN ${c} TEXT`);
+  }
+}
+
 const DEFAULTS = {
   company_name: 'POKASA',
   timezone: 'Asia/Jakarta',
@@ -239,17 +247,19 @@ function savePhoto(dataUrl, prefix) {
 }
 const removePhoto = (name) => name && fs.rmSync(path.join(PHOTO_DIR, name), { force: true });
 
-// Jadwal kerja per divisi + hari libur
+// Jadwal kerja: jadwal khusus karyawan (kalau diisi) > jadwal divisi > default; plus hari libur nasional.
+// `person` = baris karyawan / absen yang punya division_id, work_start, work_end, work_days.
 const DEFAULT_SCHED = { work_start: '08:00', work_end: '17:00', work_days: '1,2,3,4,5' };
 function scheduleLookup() {
   const divs = new Map(db.prepare('SELECT * FROM divisions').all().map((d) => [d.id, d]));
   const holidays = new Map(db.prepare('SELECT date, name FROM holidays').all().map((h) => [h.date, h.name]));
-  return (divisionId, date) => {
-    const d = divs.get(divisionId) || DEFAULT_SCHED;
+  return (person, date) => {
+    const custom = !!person?.work_start;
+    const d = custom ? person : divs.get(person?.division_id) || DEFAULT_SCHED;
     const dow = new Date(date + 'T00:00:00Z').getUTCDay();
     const holidayName = holidays.get(date);
     const off = !!holidayName || !d.work_days.split(',').map(Number).includes(dow);
-    return { work_start: d.work_start, work_end: d.work_end, off, holiday_name: holidayName || null };
+    return { work_start: d.work_start, work_end: d.work_end, off, holiday_name: holidayName || null, custom };
   };
 }
 
@@ -289,11 +299,12 @@ function groupDays(rows, sched, locNames) {
     if (!map.has(key)) map.set(key, {
       date: r.date, employee_id: r.employee_id, name: r.name, phone: r.phone, division: r.division,
       division_id: r.division_id, emp_type: r.emp_type, in: null, out: null,
+      work_start: r.work_start, work_end: r.work_end, work_days: r.work_days,
     });
     map.get(key)[r.type] = recordView(r, locNames);
   }
   for (const d of map.values()) {
-    const sc = sched(d.division_id, d.date);
+    const sc = sched(d, d.date);
     const outOk = d.out && d.out.approval !== 'rejected';
     d.minutes = d.in && outOk ? Math.max(0, Math.round(toMinutes(d.out.time) - toMinutes(d.in.time))) : null;
     d.early = !!(outOk && !d.out.holiday && d.out.time.slice(0, 5) < sc.work_end);
@@ -302,7 +313,8 @@ function groupDays(rows, sched, locNames) {
   return [...map.values()];
 }
 
-const ATT_SELECT = `SELECT a.*, e.name, e.phone, e.division_id, e.type AS emp_type, e.profile_photo, d.name AS division
+const ATT_SELECT = `SELECT a.*, e.name, e.phone, e.division_id, e.type AS emp_type, e.profile_photo,
+    e.work_start, e.work_end, e.work_days, d.name AS division
   FROM attendance a JOIN employees e ON e.id = a.employee_id LEFT JOIN divisions d ON d.id = e.division_id`;
 
 // ---------- Alamat otomatis (OpenStreetMap Nominatim, maks. 1 permintaan/detik) ----------
@@ -463,10 +475,11 @@ route('POST', '/api/logout', null, ({ req, res }) => { endSession(req, res, 'emp
 
 route('GET', '/api/me', 'emp', ({ session }) => {
   const s = getSettings();
-  const emp = db.prepare(`SELECT e.id, e.name, e.phone, e.type, e.division_id, d.name AS division
+  const emp = db.prepare(`SELECT e.id, e.name, e.phone, e.type, e.division_id, e.work_start, e.work_end, e.work_days,
+                            d.name AS division
                           FROM employees e LEFT JOIN divisions d ON d.id = e.division_id WHERE e.id = ?`).get(session.employee_id);
   const { date } = localParts(new Date(), s.timezone);
-  const sc = scheduleLookup()(emp.division_id, date);
+  const sc = scheduleLookup()(emp, date);
   const locNames = locationNames();
   const recs = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND date = ?').all(emp.id, date);
   const pick = (t) => recordView(recs.find((x) => x.type === t), locNames);
@@ -527,7 +540,7 @@ route('POST', '/api/attend', 'emp', ({ session, body }) => {
   if (outside && note.length < 3) throw new HttpError(400, 'Kamu di luar area kantor. Isi keterangan lokasi/kegiatan dulu.');
 
   if (!body.photo && s.require_photo === '1') throw new HttpError(400, 'Foto selfie wajib untuk absen.');
-  const sc = scheduleLookup()(emp.division_id, date);
+  const sc = scheduleLookup()(emp, date);
   const late = type === 'in' && !sc.off && time.slice(0, 5) > sc.work_start ? 1 : 0;
   const photo = body.photo ? savePhoto(body.photo, `${date}_${emp.id}_${type}`) : null;
   let id;
@@ -619,7 +632,8 @@ route('GET', '/api/admin/overview', 'admin', ({ query }) => {
   const locNames = locationNames();
   const byEmp = new Map(groupDays(db.prepare(`${ATT_SELECT} WHERE a.date = ?`).all(date), sched, locNames)
     .map((d) => [d.employee_id, d]));
-  const emps = db.prepare(`SELECT e.id, e.name, e.phone, e.type, e.status, e.division_id, d.name AS division
+  const emps = db.prepare(`SELECT e.id, e.name, e.phone, e.type, e.status, e.division_id, e.work_start, e.work_end, e.work_days,
+                             d.name AS division
                            FROM employees e LEFT JOIN divisions d ON d.id = e.division_id
                            WHERE e.status != 'pending' ORDER BY e.name`).all()
     .filter((e) => (e.status === 'active' || byEmp.has(e.id))
@@ -627,10 +641,10 @@ route('GET', '/api/admin/overview', 'admin', ({ query }) => {
       && (!type || e.type === type));
   const rows = emps.map((e) => {
     const d = byEmp.get(e.id);
-    const sc = sched(e.division_id, date);
+    const sc = sched(e, date);
     return {
       employee_id: e.id, name: e.name, phone: e.phone, division: e.division, emp_type: e.type,
-      schedule: `${sc.work_start}–${sc.work_end}`, off: sc.off,
+      schedule: `${sc.work_start}–${sc.work_end}`, off: sc.off, custom_schedule: sc.custom,
       in: d?.in || null, out: d?.out || null, minutes: d?.minutes ?? null, early: d?.early || false,
       status: d ? d.status : dayStatus(null, sc.off),
     };
@@ -666,7 +680,7 @@ route('POST', '/api/admin/attendance', 'admin', ({ body }) => {
   const type = body.type;
   if (type !== 'in' && type !== 'out') throw new HttpError(400, 'Jenis absen tidak valid.');
   if (!isDate(body.date) || !isHHMM(body.time)) throw new HttpError(400, 'Tanggal/jam tidak valid.');
-  const sc = scheduleLookup()(emp.division_id, body.date);
+  const sc = scheduleLookup()(emp, body.date);
   const late = type === 'in' && !sc.off && body.time > sc.work_start ? 1 : 0;
   try {
     db.prepare(`INSERT INTO attendance (employee_id, type, ts, date, time, note, late, holiday, approval, decided_by, decided_at)
@@ -763,6 +777,7 @@ route('GET', '/api/admin/export.csv', 'admin', ({ query, res }) => {
 // --- Karyawan ---
 route('GET', '/api/admin/employees', 'admin', () => ({
   employees: db.prepare(`SELECT e.id, e.name, e.phone, e.type, e.status, e.division_id, d.name AS division,
+                           e.work_start, e.work_end, e.work_days,
                            e.profile_photo, e.device_id IS NOT NULL AS has_device, e.failed_pins >= ${MAX_PIN_FAILS} AS locked,
                            e.created_at, EXISTS (SELECT 1 FROM divisions x WHERE x.supervisor_id = e.id) AS supervisor
                          FROM employees e LEFT JOIN divisions d ON d.id = e.division_id
@@ -778,24 +793,39 @@ function validateEmployeeBody(body, currentId = null) {
   if (!phone) throw new HttpError(400, 'No. HP tidak valid. Contoh: 0812xxxxxxx');
   const dup = db.prepare('SELECT id FROM employees WHERE phone = ?').get(phone);
   if (dup && dup.id !== currentId) throw new HttpError(409, 'No. HP sudah dipakai karyawan lain.');
-  return { name, phone, divisionId: divisionIdOrNull(body.division_id), type: empType(body.type) };
+  return { name, phone, divisionId: divisionIdOrNull(body.division_id), type: empType(body.type), schedule: scheduleFromBody(body) };
+}
+
+function parseWorkDays(v) {
+  const days = [...new Set((Array.isArray(v) ? v : []).map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+  if (!days.length) throw new HttpError(400, 'Pilih minimal satu hari kerja.');
+  return days.join(',');
+}
+
+// Jadwal khusus karyawan: [work_start, work_end, work_days], atau semua null = ikut jadwal divisi
+function scheduleFromBody(body) {
+  if (!body.custom_schedule) return [null, null, null];
+  if (!isHHMM(body.work_start) || !isHHMM(body.work_end)) throw new HttpError(400, 'Jam jadwal khusus harus format JJ:MM.');
+  return [body.work_start, body.work_end, parseWorkDays(body.work_days)];
 }
 
 route('POST', '/api/admin/employees', 'admin', ({ body }) => {
-  const { name, phone, divisionId, type } = validateEmployeeBody(body);
+  const { name, phone, divisionId, type, schedule } = validateEmployeeBody(body);
   const pin = newPin();
-  const r = db.prepare("INSERT INTO employees (name, phone, division_id, type, status, pin_hash) VALUES (?, ?, ?, ?, 'active', ?)")
-    .run(name, phone, divisionId, type, hashSecret(pin));
+  const r = db.prepare(`INSERT INTO employees (name, phone, division_id, type, status, pin_hash, work_start, work_end, work_days)
+                        VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`)
+    .run(name, phone, divisionId, type, hashSecret(pin), ...schedule);
   return { ok: true, id: Number(r.lastInsertRowid), name, phone, pin };
 });
 
 route('PUT', '/api/admin/employees/:id', 'admin', ({ params, body }) => {
   const emp = getEmployee(params.id);
   if (emp.status === 'pending') throw new HttpError(400, 'Setujui atau tolak pendaftaran ini dulu.');
-  const { name, phone, divisionId, type } = validateEmployeeBody(body, emp.id);
+  const { name, phone, divisionId, type, schedule } = validateEmployeeBody(body, emp.id);
   const status = body.status === 'inactive' ? 'inactive' : 'active';
-  db.prepare('UPDATE employees SET name = ?, phone = ?, division_id = ?, type = ?, status = ? WHERE id = ?')
-    .run(name, phone, divisionId, type, status, emp.id);
+  db.prepare(`UPDATE employees SET name = ?, phone = ?, division_id = ?, type = ?, status = ?,
+                work_start = ?, work_end = ?, work_days = ? WHERE id = ?`)
+    .run(name, phone, divisionId, type, status, ...schedule, emp.id);
   if (status === 'inactive') {
     killEmpSessions(emp.id);
     db.prepare('UPDATE divisions SET supervisor_id = NULL WHERE supervisor_id = ?').run(emp.id);
@@ -899,12 +929,11 @@ function validateDivision(body) {
   const name = str(body.name, 60);
   if (!name) throw new HttpError(400, 'Nama divisi wajib diisi.');
   if (!isHHMM(body.work_start) || !isHHMM(body.work_end)) throw new HttpError(400, 'Jam kerja harus format JJ:MM.');
-  const days = [...new Set((Array.isArray(body.work_days) ? body.work_days : []).map(Number).filter((d) => d >= 0 && d <= 6))].sort();
-  if (!days.length) throw new HttpError(400, 'Pilih minimal satu hari kerja.');
+  const days = parseWorkDays(body.work_days);
   const sup = num(body.supervisor_id);
   if (sup != null && !db.prepare("SELECT 1 FROM employees WHERE id = ? AND status = 'active'").get(sup))
     throw new HttpError(400, 'Atasan harus karyawan aktif.');
-  return [name, body.work_start, body.work_end, days.join(','), sup];
+  return [name, body.work_start, body.work_end, days, sup];
 }
 
 route('POST', '/api/admin/divisions', 'admin', ({ body }) => {
