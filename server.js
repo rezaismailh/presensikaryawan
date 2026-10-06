@@ -85,6 +85,9 @@ db.exec(`
   for (const c of ['work_start', 'work_end', 'work_days']) {
     if (!cols.includes(c)) db.exec(`ALTER TABLE employees ADD COLUMN ${c} TEXT`);
   }
+  // Pengakuan lembur saat absen pulang: NULL = tidak ditanya, 0 = tidak, 1 = lembur
+  if (!db.prepare('PRAGMA table_info(attendance)').all().some((c) => c.name === 'overtime'))
+    db.exec('ALTER TABLE attendance ADD COLUMN overtime INTEGER');
 }
 
 const DEFAULTS = {
@@ -94,6 +97,7 @@ const DEFAULTS = {
   device_lock: '1',
   geocode: '1',
   join_code: '',
+  overtime_ask_after: '18:00', // kosong = tidak ditanya
 };
 
 function getSettings() {
@@ -113,6 +117,7 @@ function publicSettings(s = getSettings()) {
     device_lock: s.device_lock === '1',
     geocode: s.geocode === '1',
     join_code: s.join_code,
+    overtime_ask_after: s.overtime_ask_after,
   };
 }
 
@@ -277,6 +282,7 @@ function recordView(r, locNames) {
     accuracy: r.accuracy == null ? null : Math.round(r.accuracy),
     lat: r.lat, lng: r.lng, address: r.address, note: r.note,
     approval: r.approval, decided_by: r.decided_by,
+    overtime: r.overtime == null ? null : !!r.overtime,
     photo: r.photo ? `/photos/${r.photo}` : null,
   };
 }
@@ -308,6 +314,7 @@ function groupDays(rows, sched, locNames) {
     const outOk = d.out && d.out.approval !== 'rejected';
     d.minutes = d.in && outOk ? Math.max(0, Math.round(toMinutes(d.out.time) - toMinutes(d.in.time))) : null;
     d.early = !!(outOk && !d.out.holiday && d.out.time.slice(0, 5) < sc.work_end);
+    d.overtime = !!(outOk && d.out.overtime);
     d.status = dayStatus(d, sc.off);
   }
   return [...map.values()];
@@ -493,7 +500,10 @@ route('GET', '/api/me', 'emp', ({ session }) => {
     employee: emp, date, schedule: sc,
     today: { in: pick('in'), out: pick('out') },
     locations: db.prepare('SELECT name, lat, lng, radius_m FROM locations').all(),
-    settings: { company_name: s.company_name, timezone: s.timezone, require_photo: s.require_photo === '1' },
+    settings: {
+      company_name: s.company_name, timezone: s.timezone, require_photo: s.require_photo === '1',
+      overtime_ask_after: s.overtime_ask_after,
+    },
     supervisor: supervises.length > 0, pendingApprovals,
     serverTime: Date.now(),
   };
@@ -539,6 +549,14 @@ route('POST', '/api/attend', 'emp', ({ session, body }) => {
   const note = str(body.note, 300);
   if (outside && note.length < 3) throw new HttpError(400, 'Kamu di luar area kantor. Isi keterangan lokasi/kegiatan dulu.');
 
+  // Absen pulang lewat jam tertentu: karyawan wajib menjawab lembur atau tidak
+  let overtime = null;
+  if (type === 'out' && s.overtime_ask_after && time.slice(0, 5) >= s.overtime_ask_after) {
+    if (typeof body.overtime !== 'boolean') throw new HttpError(400, `Sudah lewat jam ${s.overtime_ask_after}. Pilih dulu: lembur atau tidak.`);
+    if (body.overtime && note.length < 3) throw new HttpError(400, 'Isi keterangan pekerjaan lembur.');
+    overtime = body.overtime ? 1 : 0;
+  }
+
   if (!body.photo && s.require_photo === '1') throw new HttpError(400, 'Foto selfie wajib untuk absen.');
   const sc = scheduleLookup()(emp, date);
   const late = type === 'in' && !sc.off && time.slice(0, 5) > sc.work_start ? 1 : 0;
@@ -546,11 +564,11 @@ route('POST', '/api/attend', 'emp', ({ session, body }) => {
   let id;
   try {
     id = Number(db.prepare(`INSERT INTO attendance (employee_id, type, ts, date, time, lat, lng, accuracy, location_id, distance,
-                              outside, note, photo, late, holiday, approval)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                              outside, note, photo, late, holiday, approval, overtime)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(emp.id, type, new Date().toISOString(), date, time, lat, lng, accuracy,
            inside ? nearest.loc.id : null, nearest ? nearest.d : null, outside ? 1 : 0, note || null, photo,
-           late, sc.off ? 1 : 0, outside ? 'pending' : 'auto').lastInsertRowid);
+           late, sc.off ? 1 : 0, outside ? 'pending' : 'auto', overtime).lastInsertRowid);
   } catch (e) {
     removePhoto(photo);
     if (String(e.message).includes('UNIQUE')) throw new HttpError(409, 'Absen ini sudah tercatat.');
@@ -558,7 +576,7 @@ route('POST', '/api/attend', 'emp', ({ session, body }) => {
   }
   if (outside) queueGeocode(id, lat, lng);
   return {
-    ok: true, type, date, time, late: !!late, holiday: sc.off, outside,
+    ok: true, type, date, time, late: !!late, holiday: sc.off, outside, overtime: overtime === 1,
     location: inside ? nearest.loc.name : outside ? 'Luar kantor' : null,
     distance: nearest ? Math.round(nearest.d) : null,
   };
@@ -738,6 +756,7 @@ route('GET', '/api/admin/recap', 'admin', ({ query }) => {
       pending: c((d) => d.status === 'pending'),
       rejected: c((d) => d.status === 'rejected'),
       holiday: c((d) => d.status === 'holiday'),
+      overtime: c((d) => d.overtime),
       no_out: c((d) => d.in && !d.out && d.date < t && d.status !== 'rejected'),
       minutes: mine.reduce((a, d) => a + (d.minutes || 0), 0),
     };
@@ -759,11 +778,11 @@ route('GET', '/api/admin/export.csv', 'admin', ({ query, res }) => {
   const dur = (m) => (m == null ? '' : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`);
   const loc = (r) => (r ? [r.location, r.address].filter(Boolean).join(' — ') : '');
   const lines = [['Tanggal', 'Nama', 'No. HP', 'Divisi', 'Tipe', 'Masuk', 'Lokasi Masuk', 'Pulang', 'Lokasi Pulang',
-                  'Status', 'Pulang Cepat', 'Durasi (jam:menit)', 'Keterangan', 'Diputuskan oleh']];
+                  'Status', 'Pulang Cepat', 'Lembur', 'Durasi (jam:menit)', 'Keterangan', 'Diputuskan oleh']];
   for (const d of [...days].reverse()) {
     lines.push([d.date, d.name, '0' + d.phone.slice(2), d.division, d.emp_type === 'freelance' ? 'Freelance' : 'Karyawan',
                 d.in?.time, loc(d.in), d.out?.time, loc(d.out), STATUS_LABEL[d.status], d.early ? 'Ya' : '',
-                dur(d.minutes), [d.in?.note, d.out?.note].filter(Boolean).join(' | '), d.in?.decided_by]);
+                d.overtime ? 'Ya' : d.out?.overtime === false ? 'Tidak' : '', dur(d.minutes), [d.in?.note, d.out?.note].filter(Boolean).join(' | '), d.in?.decided_by]);
   }
   // Pemisah ';' + BOM supaya langsung rapi di Excel regional Indonesia
   const csv = '﻿' + lines.map((l) => l.map(esc).join(';')).join('\r\n');
@@ -1011,6 +1030,9 @@ route('PUT', '/api/admin/settings', 'admin', ({ body }) => {
   try { new Intl.DateTimeFormat('en', { timeZone: body.timezone }); } catch { throw new HttpError(400, 'Zona waktu tidak valid.'); }
   const code = str(body.join_code, 40).toUpperCase();
   if (!/^[A-Z0-9-]{4,40}$/.test(code)) throw new HttpError(400, 'Kode perusahaan 4–40 huruf/angka.');
+  const otAfter = str(body.overtime_ask_after, 5);
+  if (otAfter && !isHHMM(otAfter)) throw new HttpError(400, 'Jam tanya lembur harus format JJ:MM, atau kosongkan.');
+  setSetting('overtime_ask_after', otAfter);
   setSetting('company_name', company);
   setSetting('timezone', body.timezone);
   setSetting('join_code', code);

@@ -233,6 +233,8 @@ body.app { min-height: 100dvh; }
 .loc-status.danger { background: var(--danger-soft); border-color: transparent; }
 .loc-status .ico { font-size: 18px; line-height: 1.3; }
 
+button.choice.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
 .approval { display: grid; grid-template-columns: 72px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
 .approval:first-child { border-top: 0; }
 .approval img { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; background: var(--surface-2); }

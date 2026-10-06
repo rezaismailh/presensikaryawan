@@ -101,7 +101,7 @@ function timeCell(r) {
     <div class="row" style="gap:8px">
       ${r.photo ? `<img class="thumb" src="${esc(r.photo)}" alt="" data-photo="${esc(r.photo)}" loading="lazy">` : ''}
       <div class="stack" style="gap:2px">
-        <span class="t">${hhmm(r.time)} ${r.late ? '<span class="badge warn">Telat</span>' : ''} ${approvalBadge(r)}</span>
+        <span class="t">${hhmm(r.time)} ${r.late ? '<span class="badge warn">Telat</span>' : ''} ${r.overtime ? '<span class="badge accent">Lembur</span>' : ''} ${approvalBadge(r)}</span>
         <span class="sub">${esc(where)} ${mapsLink(r)}</span>
       </div>
     </div>
@@ -389,13 +389,13 @@ async function loadRecap() {
   $('#r-summary').innerHTML = `
     <thead><tr><th>Nama</th><th>Divisi</th><th>Tipe</th><th class="num">Hadir</th><th class="num">Telat</th><th class="num">Pulang cepat</th>
       <th class="num">Luar kantor</th><th class="num">Menunggu</th><th class="num">Ditolak</th><th class="num">Masuk hari libur</th>
-      <th class="num">Tanpa absen pulang</th><th class="num">Total jam</th></tr></thead>
+      <th class="num">Lembur</th><th class="num">Tanpa absen pulang</th><th class="num">Total jam</th></tr></thead>
     <tbody>${d.summary.length ? d.summary.map((s) => `
       <tr><td>${esc(s.name)}</td><td>${esc(s.division || '')}</td><td>${typeLabel(s.emp_type)}</td>
         <td class="num">${s.present}</td><td class="num">${s.late || ''}</td><td class="num">${s.early || ''}</td>
         <td class="num">${s.outside || ''}</td><td class="num">${s.pending || ''}</td><td class="num">${s.rejected || ''}</td>
-        <td class="num">${s.holiday || ''}</td><td class="num">${s.no_out || ''}</td><td class="num">${fmtDur(s.minutes)}</td></tr>`).join('')
-      : '<tr><td colspan="12" class="empty">Tidak ada data.</td></tr>'}</tbody>`;
+        <td class="num">${s.holiday || ''}</td><td class="num">${s.overtime || ''}</td><td class="num">${s.no_out || ''}</td><td class="num">${fmtDur(s.minutes)}</td></tr>`).join('')
+      : '<tr><td colspan="13" class="empty">Tidak ada data.</td></tr>'}</tbody>`;
   $('#r-days').innerHTML = `
     <thead><tr><th>Tanggal</th><th>Nama</th><th>Masuk</th><th>Pulang</th><th>Durasi</th><th>Status</th></tr></thead>
     <tbody>${d.days.length ? d.days.map((x) => `
@@ -702,6 +702,7 @@ async function loadSettings() {
   f.require_photo.checked = settings.require_photo;
   f.device_lock.checked = settings.device_lock;
   f.geocode.checked = settings.geocode;
+  f.overtime_ask_after.value = settings.overtime_ask_after || '';
 
   const link = location.origin + '/';
   $('#s-link').value = link;
@@ -722,6 +723,7 @@ $('#s-form').addEventListener('submit', async (e) => {
     await api('/api/admin/settings', { method: 'PUT', body: {
       company_name: f.company_name.value, timezone: f.timezone.value, join_code: f.join_code.value,
       require_photo: f.require_photo.checked, device_lock: f.device_lock.checked, geocode: f.geocode.checked,
+      overtime_ask_after: f.overtime_ask_after.value,
     } });
     toast('Pengaturan disimpan.');
     refreshCounts();

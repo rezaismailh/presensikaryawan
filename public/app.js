@@ -92,6 +92,7 @@ function recordBadges(r) {
   const b = [];
   if (r.late) b.push('<span class="badge warn">Telat</span>');
   if (r.holiday) b.push('<span class="badge info">Hari libur</span>');
+  if (r.overtime) b.push('<span class="badge accent">Lembur</span>');
   if (r.outside) {
     if (r.approval === 'pending') b.push('<span class="badge warn">Menunggu ACC</span>');
     else if (r.approval === 'approved') b.push('<span class="badge ok">Luar kantor ✓</span>');
@@ -154,7 +155,7 @@ async function loadHistory() {
       <div class="list-item">
         <div class="grow">
           <div style="font-weight:600">${esc(fmtDate(d.date, { weekday: 'short', day: 'numeric', month: 'short' }))}</div>
-          <div class="row" style="gap:4px">${recordBadges(d.in)}</div>
+          <div class="row" style="gap:4px">${recordBadges(d.in)}${d.out?.overtime ? ' <span class="badge accent">Lembur</span>' : ''}</div>
         </div>
         <div class="mono" style="text-align:right">${hhmm(d.in?.time)} – ${hhmm(d.out?.time)}</div>
       </div>`).join('')
@@ -207,7 +208,12 @@ function createCamera(box) {
 
 // ---------- Lembar absen ----------
 const sheetCam = createCamera($('#sheet-cam'));
-const sheet = { type: 'in', pos: null, photo: null, outside: false };
+const sheet = { type: 'in', pos: null, photo: null, outside: false, askOt: false, overtime: null };
+
+// Jam sekarang menurut server (JJ:MM), dipakai untuk menentukan perlu tanya lembur atau tidak
+const serverHHMM = () => new Intl.DateTimeFormat('en-GB', {
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: me.settings.timezone,
+}).format(new Date(Date.now() + clockOffset));
 
 function setLocStatus(kind, html) {
   const el = $('#loc-status');
@@ -272,14 +278,39 @@ function locate() {
 }
 
 function updateSubmit() {
-  $('#note-wrap').hidden = !sheet.outside;
+  // Catatan: selalu ada saat pulang (opsional), wajib kalau di luar kantor atau lembur
+  const noteRequired = sheet.outside || sheet.overtime === true;
+  $('#note-wrap').hidden = !(sheet.type === 'out' || sheet.outside);
+  $('#note-label').textContent = sheet.outside ? 'Keterangan (wajib, kamu di luar kantor)'
+    : sheet.overtime === true ? 'Keterangan pekerjaan lembur (wajib)'
+    : 'Catatan untuk atasan/HRD (opsional)';
+  $('#note').placeholder = sheet.outside ? 'Contoh: Meeting dengan klien di PT ABC, Cikarang'
+    : sheet.overtime === true ? 'Contoh: Lanjut pemasangan panel proyek X'
+    : 'Contoh: Pulang dari meeting di luar, lanjut kerja dari kantor';
+  $('#ot-wrap').hidden = !sheet.askOt;
+  $$('#ot-wrap [data-ot]').forEach((b) => b.classList.toggle('selected', sheet.overtime === (b.dataset.ot === '1')));
+
   const needPhoto = me?.settings.require_photo;
-  const ok = sheet.pos && (!needPhoto || sheet.photo) && (!sheet.outside || $('#note').value.trim().length >= 3);
+  const ok = sheet.pos && (!needPhoto || sheet.photo)
+    && (!noteRequired || $('#note').value.trim().length >= 3)
+    && (!sheet.askOt || sheet.overtime !== null);
   $('#submit-btn').disabled = !ok;
 }
 
+$('#ot-wrap').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ot]');
+  if (!b) return;
+  sheet.overtime = b.dataset.ot === '1';
+  updateSubmit();
+});
+
 async function openSheet(type) {
-  Object.assign(sheet, { type, pos: null, photo: null, outside: false });
+  const otAfter = me.settings.overtime_ask_after;
+  Object.assign(sheet, {
+    type, pos: null, photo: null, outside: false, overtime: null,
+    askOt: type === 'out' && !!otAfter && serverHHMM() >= otAfter,
+  });
+  $('#ot-time').textContent = otAfter || '';
   $('#sheet-title').textContent = type === 'in' ? 'Absen Masuk' : 'Absen Pulang';
   $('#note').value = '';
   $('#sheet').hidden = false;
@@ -328,16 +359,22 @@ $('#submit-btn').addEventListener('click', async () => {
   try {
     const c = sheet.pos.coords;
     const r = await api('/api/attend', {
-      body: { type: sheet.type, lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: sheet.photo, note: $('#note').value },
+      body: {
+        type: sheet.type, lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: sheet.photo,
+        note: $('#note').value, overtime: sheet.askOt ? sheet.overtime : undefined,
+      },
     });
     closeSheet();
     navigator.vibrate?.(80);
     const label = r.type === 'in' ? 'masuk' : 'pulang';
-    toast(r.outside ? `Absen ${label} ${hhmm(r.time)} terkirim, menunggu persetujuan.` : `Absen ${label} tercatat ${hhmm(r.time)}${r.late ? ' (telat)' : ''}.`);
+    const extra = r.late ? ' (telat)' : r.overtime ? ' (lembur)' : '';
+    toast(r.outside ? `Absen ${label} ${hhmm(r.time)} terkirim, menunggu persetujuan.` : `Absen ${label} tercatat ${hhmm(r.time)}${extra}.`);
     await loadHome();
   } catch (err) {
     toast(err.message, true);
     if (err.status === 401) return start();
+    // Jam HP sedikit beda dengan server di sekitar batas jam lembur → tampilkan pertanyaannya
+    if (/lembur atau tidak/.test(err.message)) sheet.askOt = true;
   } finally {
     btn.textContent = 'Kirim absen';
     updateSubmit();

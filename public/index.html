@@ -166,8 +166,15 @@
         <button type="button" class="ghost grow" id="retake-btn" hidden>Ulangi foto</button>
       </div>
     </div>
-    <label class="field" id="note-wrap" hidden>Keterangan (wajib di luar kantor)
-      <textarea id="note" maxlength="300" placeholder="Contoh: Survey lokasi proyek di PT ABC, Cikarang"></textarea>
+    <div id="ot-wrap" class="stack" hidden style="gap:8px">
+      <span style="font-weight:600">Sudah lewat jam <span id="ot-time">18:00</span>. Kamu lembur hari ini?</span>
+      <div class="row">
+        <button type="button" class="ghost grow choice" data-ot="1">Ya, lembur</button>
+        <button type="button" class="ghost grow choice" data-ot="0">Tidak</button>
+      </div>
+    </div>
+    <label class="field" id="note-wrap" hidden><span id="note-label">Keterangan</span>
+      <textarea id="note" maxlength="300"></textarea>
     </label>
     <button type="button" class="big-btn" id="submit-btn" disabled>Kirim absen</button>
   </div>

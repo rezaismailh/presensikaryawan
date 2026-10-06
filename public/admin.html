@@ -133,6 +133,10 @@
             </select>
           </label>
           <label class="field">Kode perusahaan (untuk registrasi mandiri) <input name="join_code" required maxlength="40" autocapitalize="characters"></label>
+          <label class="field">Tanya "lembur atau tidak" saat absen pulang setelah jam
+            <input type="time" name="overtime_ask_after">
+            <small style="font-weight:400">Kosongkan kalau tidak perlu ditanya.</small>
+          </label>
           <label class="check"><input type="checkbox" name="require_photo"> Wajib selfie saat absen</label>
           <label class="check"><input type="checkbox" name="device_lock"> Kunci 1 akun ke 1 HP</label>
           <label class="check"><input type="checkbox" name="geocode"> Isi alamat otomatis untuk absen luar kantor (OpenStreetMap)</label>
