@@ -253,20 +253,22 @@ function locate() {
     setLocStatus('danger', 'HP ini tidak mendukung lokasi.');
     return;
   }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      sheet.pos = pos;
-      evaluateLocation(pos);
-      updateSubmit();
-    },
-    (err) => {
-      setLocStatus('danger', err.code === 1
-        ? 'Izin lokasi ditolak. Aktifkan izin lokasi untuk aplikasi/browser ini di Pengaturan HP, lalu coba lagi.'
-        : 'Lokasi belum didapat. Pastikan GPS aktif, lalu coba lagi.');
-      $('#loc-retry').hidden = false;
-    },
-    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
-  );
+  const ok = (pos) => {
+    sheet.pos = pos;
+    evaluateLocation(pos);
+    updateSubmit();
+  };
+  const fail = (err) => {
+    setLocStatus('danger', err.code === 1
+      ? 'Izin lokasi ditolak. Aktifkan izin lokasi untuk aplikasi/browser ini di Pengaturan HP, lalu coba lagi.'
+      : 'Lokasi belum didapat. Pastikan GPS/Lokasi HP aktif, lalu coba lagi.');
+    $('#loc-retry').hidden = false;
+  };
+  // GPS akurat dulu; kalau gagal (misalnya di dalam gedung), ulangi dengan lokasi WiFi/jaringan
+  navigator.geolocation.getCurrentPosition(ok, (err) => {
+    if (err.code === 1) return fail(err);
+    navigator.geolocation.getCurrentPosition(ok, fail, { enableHighAccuracy: false, timeout: 20000, maximumAge: 30000 });
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
 }
 
 function updateSubmit() {

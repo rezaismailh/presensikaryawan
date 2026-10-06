@@ -765,6 +765,21 @@ async function loadLocations() {
         <td><div class="actions"><button class="ghost small" data-act="edit">Edit</button><button class="ghost small" data-act="delete">Hapus</button></div></td></tr>`).join('')
       : '<tr><td colspan="4" class="empty">Belum ada lokasi. Selama kosong, semua absen dianggap di kantor.</td></tr>'}</tbody>`;
 }
+// Coba GPS akurat dulu; kalau gagal (laptop tanpa GPS, di dalam gedung), ulangi dengan lokasi WiFi/jaringan
+function getPosition() {
+  const once = (opts) => new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, opts));
+  if (!navigator.geolocation) return Promise.reject(new Error('Browser ini tidak mendukung lokasi.'));
+  return once({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })
+    .catch((err) => (err.code === 1 ? Promise.reject(err) : once({ enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 })))
+    .catch((err) => {
+      throw new Error({
+        1: 'Izin lokasi ditolak browser. Klik ikon gembok di address bar → Location → Allow, lalu coba lagi.',
+        2: 'Lokasi tidak tersedia. Di laptop Windows, aktifkan Settings → Privacy & security → Location (Location services menyala), lalu coba lagi.',
+        3: 'Waktu habis mencari lokasi. Coba lagi, atau tempel koordinat dari Google Maps.',
+      }[err.code] || 'Lokasi tidak bisa diambil.');
+    });
+}
+
 function parseCoords(text) {
   const m = String(text).match(/(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)/);
   return m ? [Number(m[1]), Number(m[2])] : null;
@@ -787,12 +802,21 @@ function locationDialog(l = { radius_m: 150 }) {
     toast('Lokasi disimpan.');
     loadLocations();
   });
-  $('#loc-here', body).onclick = () => {
-    navigator.geolocation?.getCurrentPosition(
-      (p) => { body.coords.value = `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)}`; toast(`Akurasi ±${Math.round(p.coords.accuracy)} m`); },
-      () => toast('Lokasi tidak bisa diambil. Izinkan akses lokasi.', true),
-      { enableHighAccuracy: true, timeout: 20000 },
-    );
+  $('#loc-here', body).onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Mencari lokasi…';
+    try {
+      const p = await getPosition();
+      body.coords.value = `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)}`;
+      const acc = Math.round(p.coords.accuracy);
+      toast(acc > 100 ? `Akurasi rendah (±${acc} m). Lebih tepat tempel koordinat dari Google Maps.` : `Lokasi didapat (±${acc} m).`, acc > 100);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Pakai lokasi saya sekarang';
+    }
   };
 }
 $('#l-add').addEventListener('click', () => locationDialog());
