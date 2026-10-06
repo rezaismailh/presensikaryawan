@@ -332,7 +332,9 @@ async function pumpGeocode() {
 }
 
 // ---------- HTTP ----------
-const SECURITY_HEADERS = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin' };
+// strict-origin-when-cross-origin: ke situs lain hanya mengirim origin (tanpa path). Tile OpenStreetMap
+// mewajibkan Referer; dengan 'same-origin' peta diblokir (403 "Access blocked").
+const SECURITY_HEADERS = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin' };
 function send(res, status, body, headers = {}) {
   res.writeHead(status, { ...SECURITY_HEADERS, ...headers });
   res.end(body);
