@@ -1,0 +1,14 @@
+{
+  "name": "presensikaryawan",
+  "version": "1.0.0",
+  "description": "Aplikasi absensi karyawan: PWA untuk HP (GPS + selfie) dan dashboard web untuk HRD",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "icons": "node tools/make-icons.mjs"
+  }
+}

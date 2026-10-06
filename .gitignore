@@ -1,0 +1,5 @@
+# Database, foto, dan password admin — jangan pernah masuk repo
+data/
+node_modules/
+*.log
+.env

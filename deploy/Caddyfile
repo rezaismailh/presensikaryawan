@@ -1,0 +1,6 @@
+# Ganti dengan domain kamu, misalnya absen.namaperusahaan.co.id
+# Belum punya domain? Pakai sementara: <IP-VPS>.sslip.io (contoh 103.10.20.30.sslip.io)
+absen.example.com {
+	encode gzip
+	reverse_proxy localhost:3000
+}

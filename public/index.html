@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Presensi</title>
+  <meta name="description" content="Absensi karyawan">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0f766e">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Presensi">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="app">
+
+<!-- Memuat -->
+<main id="v-loading" class="view app-wrap">
+  <div class="auth"><span class="spinner"></span></div>
+</main>
+
+<!-- iPhone: wajib dipasang ke layar utama dulu -->
+<main id="v-install" class="view app-wrap" hidden>
+  <div class="auth">
+    <img class="logo" src="/icons/icon.svg" alt="">
+    <h1>Pasang aplikasi dulu</h1>
+    <p class="muted">Supaya absen bisa dipakai di iPhone, pasang aplikasi ini ke layar utama:</p>
+    <ol class="card stack" style="margin:0;padding-left:36px">
+      <li>Ketuk tombol <b>Bagikan</b> <span aria-hidden="true">(kotak dengan panah ke atas)</span> di bawah layar Safari.</li>
+      <li>Pilih <b>Tambah ke Layar Utama</b>, lalu <b>Tambah</b>.</li>
+      <li>Buka aplikasi <b>Presensi</b> dari layar utama, lalu login.</li>
+    </ol>
+    <p class="muted">Belum punya akun? <button class="link" data-go="register">Daftar di sini</button></p>
+  </div>
+</main>
+
+<!-- Login -->
+<main id="v-login" class="view app-wrap" hidden>
+  <form id="login-form" class="auth">
+    <img class="logo" src="/icons/icon.svg" alt="">
+    <div>
+      <h1 class="company-name">Presensi</h1>
+      <p class="muted" style="margin:4px 0 0">Masuk pakai No. HP dan PIN dari HRD.</p>
+    </div>
+    <label class="field">No. HP
+      <input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0812xxxxxxxx" required>
+    </label>
+    <label class="field">PIN
+      <input name="pin" class="pin-input" type="password" inputmode="numeric" pattern="\d{4}" maxlength="4" autocomplete="current-password" placeholder="••••" required>
+    </label>
+    <button type="submit" class="big-btn">Masuk</button>
+    <p class="muted" style="margin:0">Belum punya akun? <button type="button" class="link" data-go="register">Daftar</button></p>
+    <div id="install-banner" class="notice info" hidden>
+      <span>Pasang aplikasi ini di layar utama supaya gampang dibuka.</span>
+      <button type="button" id="install-btn" class="small">Pasang aplikasi</button>
+    </div>
+  </form>
+</main>
+
+<!-- Registrasi mandiri -->
+<main id="v-register" class="view app-wrap" hidden>
+  <div class="app-head">
+    <button class="ghost small" data-go="back">← Kembali</button>
+  </div>
+  <form id="register-form" class="stack">
+    <div>
+      <h1>Daftar akun</h1>
+      <p class="muted" style="margin:4px 0 0">Setelah disetujui HRD, PIN akan dikirim lewat WhatsApp.</p>
+    </div>
+    <label class="field">Nama lengkap <input name="name" autocomplete="name" required maxlength="80"></label>
+    <label class="field">No. HP (WhatsApp) <input name="phone" type="tel" inputmode="tel" placeholder="0812xxxxxxxx" required></label>
+    <label class="field">Divisi <select name="division_id" required></select></label>
+    <label class="field">Status kerja
+      <select name="type"><option value="karyawan">Karyawan</option><option value="freelance">Freelance</option></select>
+    </label>
+    <label class="field">Kode perusahaan <input name="join_code" autocapitalize="characters" placeholder="Tanya HRD" required></label>
+    <div class="stack">
+      <span class="muted" style="font-size:13px;font-weight:600">Foto wajah (untuk verifikasi HRD)</span>
+      <div class="cam" id="reg-cam"><video playsinline muted autoplay></video><img alt="" hidden><div class="cam-msg"></div></div>
+      <div class="row">
+        <button type="button" class="ghost grow" id="reg-cam-start">Buka kamera</button>
+        <button type="button" class="grow" id="reg-cam-shot" hidden>Ambil foto</button>
+        <button type="button" class="ghost grow" id="reg-cam-retake" hidden>Ulangi</button>
+      </div>
+    </div>
+    <button type="submit" class="big-btn">Kirim pendaftaran</button>
+  </form>
+</main>
+
+<!-- Pendaftaran terkirim -->
+<main id="v-registered" class="view app-wrap" hidden>
+  <div class="auth">
+    <img class="logo" src="/icons/icon.svg" alt="">
+    <h1>Pendaftaran terkirim</h1>
+    <p class="muted">HRD akan memeriksa data kamu. Setelah disetujui, PIN dikirim lewat WhatsApp ke nomor yang kamu daftarkan.</p>
+    <button class="ghost" data-go="login">Ke halaman login</button>
+  </div>
+</main>
+
+<!-- Beranda -->
+<main id="v-home" class="view app-wrap" hidden>
+  <header class="app-head">
+    <img src="/icons/icon.svg" alt="">
+    <span class="title company-name">Presensi</span>
+    <button class="ghost small" id="logout-btn">Keluar</button>
+  </header>
+
+  <section class="card">
+    <div class="hello">
+      <h2 id="greeting">Halo</h2>
+      <span class="muted" id="emp-meta"></span>
+    </div>
+    <div class="clock" id="clock">--:--</div>
+    <div class="muted" id="today-date"></div>
+    <div id="schedule" style="margin-top:6px"></div>
+  </section>
+
+  <section class="tiles">
+    <div class="tile"><span class="label">Masuk</span><span class="val" id="in-time">--:--</span><span id="in-badges" class="row"></span></div>
+    <div class="tile"><span class="label">Pulang</span><span class="val" id="out-time">--:--</span><span id="out-badges" class="row"></span></div>
+  </section>
+
+  <button id="attend-btn" class="big-btn">Absen Masuk</button>
+
+  <button id="approvals-card" class="ghost big-btn" hidden style="font-size:15px;justify-content:space-between">
+    <span>Persetujuan absen luar kantor</span><span class="badge danger" id="approvals-count">0</span>
+  </button>
+
+  <div id="install-banner-home" class="notice info" hidden>
+    <span>Pasang aplikasi ini di layar utama supaya gampang dibuka.</span>
+    <button type="button" class="small" id="install-btn-home">Pasang aplikasi</button>
+  </div>
+
+  <section class="card">
+    <h3 style="margin-bottom:6px">Riwayat 30 hari</h3>
+    <div class="list" id="history"></div>
+  </section>
+</main>
+
+<!-- Persetujuan (atasan divisi) -->
+<main id="v-approvals" class="view app-wrap" hidden>
+  <div class="app-head">
+    <button class="ghost small" data-go="home">← Kembali</button>
+    <span class="title">Persetujuan</span>
+  </div>
+  <p class="muted" style="margin:0">Absen di luar kantor dari anggota divisi kamu. Cocokkan foto dan keterangannya.</p>
+  <section class="card"><div id="approvals-list"></div></section>
+</main>
+
+<!-- Lembar absen: lokasi + selfie -->
+<div id="sheet" class="sheet" hidden>
+  <div class="app-wrap">
+    <div class="app-head">
+      <button class="ghost small" id="sheet-close">✕ Batal</button>
+      <span class="title" id="sheet-title">Absen Masuk</span>
+    </div>
+    <div id="loc-status" class="loc-status"><span class="ico"><span class="spinner"></span></span><span>Mencari lokasi…</span></div>
+    <button type="button" class="ghost small" id="loc-retry" hidden>Coba lagi cari lokasi</button>
+    <div id="sheet-cam-wrap" class="stack">
+      <div class="cam" id="sheet-cam"><video playsinline muted autoplay></video><img alt="" hidden><div class="cam-msg"></div></div>
+      <div class="row">
+        <button type="button" class="grow" id="shot-btn">Ambil foto</button>
+        <button type="button" class="ghost grow" id="retake-btn" hidden>Ulangi foto</button>
+      </div>
+    </div>
+    <label class="field" id="note-wrap" hidden>Keterangan (wajib di luar kantor)
+      <textarea id="note" maxlength="300" placeholder="Contoh: Survey lokasi proyek di PT ABC, Cikarang"></textarea>
+    </label>
+    <button type="button" class="big-btn" id="submit-btn" disabled>Kirim absen</button>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>
