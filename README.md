@@ -43,6 +43,16 @@ Saat pertama kali jalan, password admin dibuat acak. Password itu dicetak di ter
 - Sabtu/Minggu (sesuai hari kerja divisi) dan libur nasional tetap bisa absen, tapi ditandai "Masuk hari libur". Fitur lembur belum ada (rencana v2).
 - Salah PIN 5 kali → akun terkunci sampai dibuka HRD. Satu akun hanya bisa dipakai di satu HP; kalau ganti HP, HRD klik **Reset HP**.
 
+## Deploy ke Railway
+
+1. **New Project → Deploy from GitHub repo** → pilih `presensikaryawan`. Railway otomatis mendeteksi Node.js dan menjalankan `npm start`.
+2. Di service tersebut: **Settings → Volumes → Add Volume**, dengan mount path `/data`. Di sinilah database dan foto disimpan permanen.
+3. **Variables**: tambahkan `DATA_DIR` = `/data`. Opsional: `ADMIN_PASSWORD` = password admin pertama. Kalau tidak diisi, password acak muncul di **Deploy Logs**.
+4. **Settings → Networking → Generate Domain** → dapat alamat `https://….up.railway.app` (sudah HTTPS). Domain sendiri bisa ditambahkan nanti lewat **Custom Domain**.
+5. Buka `https://…/admin`. Link untuk karyawan adalah `https://…/`.
+
+Batas volume: paket Free maks. 500 MB (cukup untuk uji coba satu divisi), paket Hobby maks. 5 GB.
+
 ## Deploy ke VPS
 
 Kamera, GPS, dan pemasangan PWA **wajib HTTPS**. Contoh di Ubuntu dengan Caddy, yang mengurus sertifikat HTTPS gratis secara otomatis:
