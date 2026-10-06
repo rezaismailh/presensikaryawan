@@ -9,6 +9,6 @@
   },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server.js",
-    "icons": "node tools/make-icons.mjs"
+    "icons": "python tools/make-icons.py"
   }
 }

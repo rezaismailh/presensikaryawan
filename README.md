@@ -108,7 +108,7 @@ public/admin.js
 public/style.css       gaya bersama (light/dark)
 public/sw.js           service worker
 public/manifest.webmanifest
-public/icons/          ikon (PNG dibuat dengan `npm run icons`)
+public/icons/          logo & ikon PWA (dibuat dari logo perusahaan: `python tools/make-icons.py logo.jpg`)
 deploy/                contoh systemd service + Caddyfile
 data/                  database + foto (tidak masuk git)
 ```

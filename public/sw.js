@@ -1,6 +1,6 @@
 // Service worker: simpan tampilan aplikasi supaya cepat dibuka; data absen selalu dari server.
-const CACHE = 'presensi-v1';
-const SHELL = ['/', '/index.html', '/app.js', '/style.css', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
+const CACHE = 'presensi-v2';
+const SHELL = ['/', '/index.html', '/app.js', '/style.css', '/manifest.webmanifest', '/icons/logo.png', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
